@@ -70,7 +70,7 @@ public final class AccessibilityService: @unchecked Sendable {
                   let layer = window[kCGWindowLayer as String] as? Int,
                   layer == 0 else { continue }  // Only app windows (skip Control Center, menubar, etc.)
 
-            let ownerName = window[CFConstants.cgWindowName] as? String ?? ""
+            let ownerName = window[kCGWindowOwnerName as String] as? String ?? ""
             let windowName = window[CFConstants.cgWindowName] as? String ?? ""
             let appName = getProcessName(pid: ownerPID) ?? ownerName
 
