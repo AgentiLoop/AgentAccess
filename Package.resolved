@@ -1,13 +1,13 @@
 {
-  "originHash" : "e9e4412d6217ac49069cedb0e1434d39e4b3ad43400923266122beb0cf98ec54",
+  "originHash" : "1cdbc6c96a07f2f6ed86842439787783783092bb39b327feaaa4fa912a822d1f",
   "pins" : [
     {
       "identity" : "agentaudit",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/macOS26/AgentAudit.git",
       "state" : {
-        "revision" : "cc777ea0867837c55586c627508cbe37c672a7e7",
-        "version" : "1.0.0"
+        "revision" : "41caa605e81fc4c98f48bec9f4e4a06052027311",
+        "version" : "1.3.1"
       }
     },
     {
@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/steipete/AXorcist.git",
       "state" : {
-        "revision" : "c75d06f7f93e264a9786edc2b78c04973061cb2f",
-        "version" : "0.1.0"
+        "revision" : "dba24f0a2dd4a0ccfb285d7e11cf899f8b603ef6",
+        "version" : "0.1.6"
       }
     },
     {
@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/steipete/Commander.git",
       "state" : {
-        "revision" : "9e349575c8e3c6745e81fe19e5bb5efa01b078ce",
-        "version" : "0.2.1"
+        "revision" : "bd219c4ee9032fee3e009856f81fcc6ec09a85f4",
+        "version" : "0.2.4"
       }
     },
     {
@@ -33,8 +33,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-log.git",
       "state" : {
-        "revision" : "8c0f217f01000dd30f60d6e536569ad4e74291f9",
-        "version" : "1.11.0"
+        "revision" : "3ffafb9722d5d918c614feb496c8789a3b59d222",
+        "version" : "1.15.0"
       }
     }
   ],
