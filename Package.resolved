@@ -1,5 +1,5 @@
 {
-  "originHash" : "1cdbc6c96a07f2f6ed86842439787783783092bb39b327feaaa4fa912a822d1f",
+  "originHash" : "657d76ae3acf1efcf3e953d7af38ec0e09c5befbd00217b3189c5ecc3e67b35d",
   "pins" : [
     {
       "identity" : "agentaudit",
@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/steipete/AXorcist.git",
       "state" : {
-        "revision" : "dba24f0a2dd4a0ccfb285d7e11cf899f8b603ef6",
-        "version" : "0.1.6"
+        "revision" : "c75d06f7f93e264a9786edc2b78c04973061cb2f",
+        "version" : "0.1.0"
       }
     },
     {
@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/steipete/Commander.git",
       "state" : {
-        "revision" : "bd219c4ee9032fee3e009856f81fcc6ec09a85f4",
-        "version" : "0.2.4"
+        "revision" : "9e349575c8e3c6745e81fe19e5bb5efa01b078ce",
+        "version" : "0.2.1"
       }
     },
     {
