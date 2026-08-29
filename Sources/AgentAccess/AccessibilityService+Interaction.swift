@@ -98,9 +98,13 @@ extension AccessibilityService {
             root = Element.systemWide()
         }
 
-        // Use AXorcist's focusedApplicationElement to get focused element
+        // kAXFocusedUIElement is the canonical focus attribute — works on both
+        // app elements and the system-wide element. Try it first.
+        if let focused = root.focusedUIElement() {
+            return successJSON(elementProperties(focused))
+        }
+        // Fallback: focusedApplicationElement, then its focused child
         if let focusedApp = root.focusedApplicationElement() {
-            // Get the focused UI element from the focused app
             if let focusedChild = focusedApp.children()?.first(where: { $0.isFocused() == true }) {
                 return successJSON(elementProperties(focusedChild))
             }
@@ -275,7 +279,14 @@ extension AccessibilityService {
         }
 
         guard let element = found else {
-            return errorJSON("Element not found in \(appBundleId ?? "frontmost app"): role=\(role ?? "any"), title=\(title ?? "any")")
+            // Dead-end errors waste an LLM turn. List the titles that actually
+            // exist for the requested role so the model can retry correctly.
+            let hints = interactiveTitles(in: root, role: role)
+            var err = "Element not found in \(appBundleId ?? "frontmost app"): role=\(role ?? "any"), title=\(title ?? "any")."
+            if !hints.isEmpty {
+                err += " Available \(role ?? "interactive") elements: \(hints.joined(separator: " | "))"
+            }
+            return errorJSON(err)
         }
 
         // Step 3: Wait for element to be enabled
@@ -367,7 +378,19 @@ extension AccessibilityService {
         AuditLog.log(.accessibility, "typeTextIntoElement(role: \(role ?? "nil"), title: \(title ?? "nil"), text: \(text.count) chars)")
 
         guard let found = findAXElement(role: role, title: title, value: nil, appBundleId: appBundleId) else {
-            return errorJSON("Element not found for typing")
+            // List the text inputs that actually exist so the LLM can retry
+            // with a real title instead of guessing again.
+            var hints: [String] = []
+            if let bid = appBundleId,
+               let app = RunningApplicationHelper.applications(withBundleIdentifier: bid).first,
+               let appElement = Element.application(for: app) {
+                for r in ["AXTextField", "AXTextArea", "AXSearchField", "AXComboBox"] {
+                    hints += interactiveTitles(in: appElement, role: r, limit: 8).map { "\(r) '\($0)'" }
+                }
+            }
+            var err = "Element not found for typing (role=\(role ?? "any"), title=\(title ?? "any"))."
+            if !hints.isEmpty { err += " Text inputs present: \(hints.joined(separator: " | "))" }
+            return errorJSON(err)
         }
 
         // AXorcist: try Element.setValue first (fastest)
@@ -410,5 +433,35 @@ extension AccessibilityService {
             return root.findElement(matching: title, options: options)
         }
         return results.first
+    }
+
+    // MARK: - Failure Hints
+
+    /// Collect visible names for elements of `role` (or any interactive element
+    /// when role is nil) inside `root`. Used by failure paths so "not found"
+    /// errors teach the LLM the app's real vocabulary instead of dead-ending.
+    @MainActor
+    func interactiveTitles(in root: Element, role: String?, limit: Int = 25) -> [String] {
+        var names: [String] = []
+        var seen = Set<String>()
+        func collect(_ el: Element, depth: Int) {
+            guard depth > 0, names.count < limit else { return }
+            let matches = role == nil ? el.isInteractive() : (el.role() == role)
+            if matches {
+                let name = el.title().flatMap { $0.isEmpty ? nil : $0 }
+                    ?? el.descriptionText().flatMap { $0.isEmpty ? nil : $0 }
+                    ?? el.computedName()
+                if let n = name, !n.isEmpty, seen.insert(n).inserted {
+                    names.append(String(n.prefix(60)))
+                }
+            }
+            if let children = el.children() {
+                for c in children where names.count < limit {
+                    collect(c, depth: depth - 1)
+                }
+            }
+        }
+        collect(root, depth: 15)
+        return names
     }
 }
