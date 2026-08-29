@@ -126,36 +126,72 @@ extension AccessibilityService {
         var current = menuBar
         for (i, menuName) in menuPath.enumerated() {
             guard let children = current.children() else {
-                return errorJSON("Could not get children at level \(i)")
+                return errorJSON("Could not get children at level \(i) ('\(menuName)')")
             }
-            var found = false
-            for child in children {
-                if child.title() == menuName {
-                    if i == menuPath.count - 1 {
-                        do {
-                            try child.performAction(.press)
-                            return successJSON(["message": "Clicked menu: \(menuPath.joined(separator: " > "))"])
-                        } catch {
-                            return errorJSON("Failed to press menu item: \(menuName)")
-                        }
-                    } else {
-                        _ = try? child.performAction(.press)
-                        Thread.sleep(forTimeInterval: 0.15)
-                        if let subs = child.children(), let first = subs.first {
-                            current = first
-                        } else {
-                            current = child
-                        }
-                        found = true
-                        break
-                    }
+            guard let child = Self.bestMenuMatch(name: menuName, in: children) else {
+                let available = children.compactMap { $0.title() }.filter { !$0.isEmpty }
+                var err = "Menu '\(menuName)' not found at level \(i)."
+                if !available.isEmpty {
+                    err += " Available: \(available.prefix(30).joined(separator: ", "))"
                 }
+                return errorJSON(err)
             }
-            if !found && i < menuPath.count - 1 {
-                return errorJSON("Menu '\(menuName)' not found at level \(i)")
+            if i == menuPath.count - 1 {
+                if child.isEnabled() == false {
+                    return errorJSON("Menu item '\(child.title() ?? menuName)' is disabled (grayed out) right now")
+                }
+                do {
+                    try child.performAction(.press)
+                    return successJSON([
+                        "message": "Clicked menu: \(menuPath.joined(separator: " > "))",
+                        "matched": child.title() ?? menuName
+                    ])
+                } catch {
+                    return errorJSON("Failed to press menu item: \(child.title() ?? menuName)")
+                }
+            } else {
+                _ = try? child.performAction(.press)
+                Thread.sleep(forTimeInterval: 0.15)
+                if let subs = child.children(), let first = subs.first {
+                    current = first
+                } else {
+                    current = child
+                }
             }
         }
         return errorJSON("Menu item not found: \(menuPath.joined(separator: " > "))")
+    }
+
+    /// Normalize a menu title for tolerant matching: trim, lowercase, strip
+    /// trailing ellipsis ("…" or "..."). "Save As" then matches "Save As…".
+    private static func normalizeMenuTitle(_ s: String) -> String {
+        var t = s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        while t.hasSuffix("…") {
+            t = String(t.dropLast()).trimmingCharacters(in: .whitespaces)
+        }
+        while t.hasSuffix("...") {
+            t = String(t.dropLast(3)).trimmingCharacters(in: .whitespaces)
+        }
+        return t
+    }
+
+    /// Find the best-matching child menu element for a requested name.
+    /// Match order: exact (normalized) → prefix → contains. Case and trailing
+    /// ellipsis are ignored so LLM-supplied paths survive cosmetic differences.
+    @MainActor
+    private static func bestMenuMatch(name: String, in children: [Element]) -> Element? {
+        let want = normalizeMenuTitle(name)
+        guard !want.isEmpty else { return nil }
+        var prefixMatch: Element?
+        var containsMatch: Element?
+        for child in children {
+            guard let title = child.title(), !title.isEmpty else { continue }
+            let have = normalizeMenuTitle(title)
+            if have == want { return child }
+            if prefixMatch == nil, have.hasPrefix(want) { prefixMatch = child }
+            if containsMatch == nil, have.contains(want) { containsMatch = child }
+        }
+        return prefixMatch ?? containsMatch
     }
 
     // MARK: - Window Move / Resize
@@ -257,22 +293,30 @@ extension AccessibilityService {
                 }
             }
             return errorJSON("App not running")
-        case "hide":
-            // AXorcist: use Element.hideApplication()
-            if let bid = bundleId, let app = RunningApplicationHelper.applications(withBundleIdentifier: bid).first,
-               let appElement = Element.application(for: app) {
+        case "hide", "unhide":
+            // AXorcist: Element.hideApplication() / unhideApplication().
+            // Resolve names via lookupBundleId (pure — no auto-launch: launching
+            // an app just to hide it would be absurd), then fall back to a
+            // localizedName match against running apps.
+            let resolvedBid = bundleId ?? name.flatMap { lookupBundleId($0) }
+            var targetApp: NSRunningApplication?
+            if let bid = resolvedBid {
+                targetApp = RunningApplicationHelper.applications(withBundleIdentifier: bid).first
+            }
+            if targetApp == nil, let n = name {
+                targetApp = RunningApplicationHelper.allApplications()
+                    .first(where: { ($0.localizedName ?? "").lowercased() == n.lowercased() })
+            }
+            guard let app = targetApp, let appElement = Element.application(for: app) else {
+                return errorJSON("App not running")
+            }
+            if action == "hide" {
                 _ = appElement.hideApplication()
-                return successJSON(["message": "Hidden \(bid)"])
-            }
-            return errorJSON("App not running")
-        case "unhide":
-            // AXorcist: use Element.unhideApplication()
-            if let bid = bundleId, let app = RunningApplicationHelper.applications(withBundleIdentifier: bid).first,
-               let appElement = Element.application(for: app) {
+                return successJSON(["message": "Hidden \(app.bundleIdentifier ?? name ?? "app")"])
+            } else {
                 _ = appElement.unhideApplication()
-                return successJSON(["message": "Unhidden \(bid)"])
+                return successJSON(["message": "Unhidden \(app.bundleIdentifier ?? name ?? "app")"])
             }
-            return errorJSON("App not running")
         case "quit":
             if let bid = bundleId, let app = RunningApplicationHelper.applications(withBundleIdentifier: bid).first {
                 app.terminate()
