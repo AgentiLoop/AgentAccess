@@ -45,6 +45,10 @@ public final class AccessibilityService: @unchecked Sendable {
            let app = RunningApplicationHelper.applications(withBundleIdentifier: bundleId).first,
            let appElement = Element.application(for: app),
            let appWindows = appElement.windows() {
+            // CG window list for the same pid — used to attach windowId so the
+            // output can drive screenshot(windowId:) / getWindowFrame(windowId:).
+            let cgWindows = WindowInfoHelper.getWindows(for: app.processIdentifier) ?? []
+            var usedWindowIds = Set<Int>()
             var results: [[String: Any]] = []
             for window in appWindows.prefix(limit) {
                 var info: [String: Any] = [:]
@@ -55,6 +59,26 @@ public final class AccessibilityService: @unchecked Sendable {
                     info["bounds"] = ["x": frame.origin.x, "y": frame.origin.y, "width": frame.width, "height": frame.height]
                 }
                 if let role = window.role() { info["role"] = role }
+                // Match the AX window to its CG window: prefer title match,
+                // fall back to frame match. Each CG id is used at most once.
+                let axTitle = window.title() ?? ""
+                let axFrame = window.frame()
+                for cg in cgWindows {
+                    guard let cgId = cg[CFConstants.cgWindowNumber] as? Int,
+                          !usedWindowIds.contains(cgId),
+                          let layer = cg[kCGWindowLayer as String] as? Int, layer == 0 else { continue }
+                    let cgName = cg[CFConstants.cgWindowName] as? String ?? ""
+                    var matches = !axTitle.isEmpty && cgName == axTitle
+                    if !matches, let f = axFrame, let b = cg[CFConstants.cgWindowBounds] as? [String: CGFloat] {
+                        matches = abs((b["X"] ?? -1) - f.origin.x) < 2 && abs((b["Y"] ?? -1) - f.origin.y) < 2
+                            && abs((b["Width"] ?? -1) - f.width) < 2 && abs((b["Height"] ?? -1) - f.height) < 2
+                    }
+                    if matches {
+                        info["windowId"] = cgId
+                        usedWindowIds.insert(cgId)
+                        break
+                    }
+                }
                 results.append(info)
             }
             return successJSON(["windows": results, "count": results.count, "app": bundleId])
