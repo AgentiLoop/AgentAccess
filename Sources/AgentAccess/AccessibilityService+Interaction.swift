@@ -134,13 +134,26 @@ extension AccessibilityService {
         }
 
         guard let found = element else { return errorJSON("Element not found") }
-        guard let children = found.children() else { return errorJSON("Element has no children") }
+        guard let children = found.children(), !children.isEmpty else { return errorJSON("Element has no children") }
 
-        var results: [[String: Any]] = []
-        for child in children {
-            results.append(elementProperties(child))
+        // Recurse to `depth` levels (previously the depth parameter was ignored and
+        // only direct children were returned, which made SwiftUI AXHostingView
+        // subtrees look empty). Bounded by a total node cap so deep trees can't
+        // produce unbounded JSON.
+        var nodeCount = 0
+        let maxNodes = 400
+        func describe(_ el: Element, remaining: Int) -> [String: Any] {
+            nodeCount += 1
+            var props = elementProperties(el)
+            if remaining > 1, nodeCount < maxNodes, let kids = el.children(), !kids.isEmpty {
+                props["children"] = kids.prefix(maxNodes - nodeCount).map { describe($0, remaining: remaining - 1) }
+            }
+            return props
         }
-        return successJSON(["count": results.count, "children": results])
+        let results = children.map { describe($0, remaining: depth) }
+        var payload: [String: Any] = ["count": results.count, "children": results]
+        if nodeCount >= maxNodes { payload["truncated"] = true }
+        return successJSON(payload)
     }
 
     // MARK: - Drag (REMOVED)
