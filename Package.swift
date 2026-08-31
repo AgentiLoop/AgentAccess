@@ -8,7 +8,7 @@ let package = Package(
         .library(name: "AgentAccess", targets: ["AgentAccess"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/macOS26/AgentAudit.git", from: "1.3.1"),
+        .package(url: "https://github.com/AgentiLoop/AgentAudit.git", from: "1.3.1"),
         // AXorcist v0.1.6+'s manifest switches to a local path dependency
         // (.package(path: "../Commander")) whenever a sibling Commander folder
         // exists — which is exactly Xcode's SourcePackages/checkouts layout.
