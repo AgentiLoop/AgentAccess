@@ -1,5 +1,5 @@
 {
-  "originHash" : "657d76ae3acf1efcf3e953d7af38ec0e09c5befbd00217b3189c5ecc3e67b35d",
+  "originHash" : "8f60fea2abd61798c9872fdf1ef45ad0177e6e05d116718ec7b1eb96cbf78c6e",
   "pins" : [
     {
       "identity" : "agentaudit",
@@ -7,7 +7,7 @@
       "location" : "https://github.com/AgentiLoop/AgentAudit.git",
       "state" : {
         "revision" : "41caa605e81fc4c98f48bec9f4e4a06052027311",
-        "version" : "1.3.1"
+        "version" : "1.3.2"
       }
     },
     {
@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/steipete/AXorcist.git",
       "state" : {
-        "revision" : "c75d06f7f93e264a9786edc2b78c04973061cb2f",
-        "version" : "0.1.0"
+        "revision" : "37d7ae82ff1443b4b36344ca6f3bf0ad33f13b12",
+        "version" : "0.1.9"
       }
     },
     {
@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/steipete/Commander.git",
       "state" : {
-        "revision" : "9e349575c8e3c6745e81fe19e5bb5efa01b078ce",
-        "version" : "0.2.1"
+        "revision" : "bd219c4ee9032fee3e009856f81fcc6ec09a85f4",
+        "version" : "0.2.4"
       }
     },
     {
