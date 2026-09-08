@@ -71,8 +71,17 @@ extension AccessibilityService {
         }
     }
 
-    /// Check whether accessibility is globally disabled.
+    /// UserDefaults key holding an array of restricted action/role identifiers
+    /// (e.g. `["AXPress", "AXTextField"]`). Empty/absent = nothing restricted.
+    public static let restrictedIDsKey = "AccessibilityRestrictedIDs"
+
+    /// True when accessibility is globally disabled, or `id` (an AX action or
+    /// role) is listed under `restrictedIDsKey`.
     public static func isRestricted(_ id: String) -> Bool {
-        !(UserDefaults.standard.object(forKey: "AccessibilityGlobalEnabled") as? Bool ?? true)
+        let defaults = UserDefaults.standard
+        let globallyEnabled = defaults.object(forKey: "AccessibilityGlobalEnabled") as? Bool ?? true
+        if !globallyEnabled { return true }
+        let restricted = defaults.stringArray(forKey: restrictedIDsKey) ?? []
+        return restricted.contains(id)
     }
 }

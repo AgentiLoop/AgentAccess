@@ -60,7 +60,7 @@ extension AccessibilityService {
     // MARK: - Find Element
 
     @MainActor
-    public func findElement(role: String?, title: String?, value: String?, appBundleId: String?, timeout: TimeInterval = automationFinishTimeout) -> String {
+    public func findElement(role: String?, title: String?, value: String?, appBundleId: String?, timeout: TimeInterval = elementSearchTimeout) -> String {
         if Self.isBrowser(appBundleId) || (appBundleId == nil && Self.frontmostAppIsBrowser()) {
             return Self.safariPageInfo()
         }
@@ -173,7 +173,7 @@ extension AccessibilityService {
     // MARK: - Wait For Element
 
     @MainActor
-    public func waitForElement(role: String?, title: String?, value: String?, appBundleId: String?, timeout: TimeInterval = automationFinishTimeout, pollInterval: TimeInterval = 0.5) -> String {
+    public func waitForElement(role: String?, title: String?, value: String?, appBundleId: String?, timeout: TimeInterval = elementSearchTimeout, pollInterval: TimeInterval = 0.5) -> String {
         if Self.isBrowser(appBundleId) || (appBundleId == nil && Self.frontmostAppIsBrowser()) {
             return Self.safariPageInfo()
         }
@@ -235,7 +235,7 @@ extension AccessibilityService {
     // MARK: - Smart Element Click (AXorcist command system)
 
     @MainActor
-    public func clickElement(role: String?, title: String?, value: String?, appBundleId: String?, timeout: TimeInterval = automationFinishTimeout, verify: Bool = false) -> String {
+    public func clickElement(role: String?, title: String?, value: String?, appBundleId: String?, timeout: TimeInterval = elementSearchTimeout, verify: Bool = false) -> String {
         if Self.isBrowser(appBundleId) || (appBundleId == nil && Self.frontmostAppIsBrowser()) {
             return Self.safariPageInfo()
         }
@@ -331,7 +331,7 @@ extension AccessibilityService {
     @MainActor
     public func waitForElementAdaptive(
         role: String?, title: String?, value: String?, appBundleId: String?,
-        timeout: TimeInterval = automationFinishTimeout,
+        timeout: TimeInterval = elementSearchTimeout,
         initialDelay: TimeInterval = 0.1,
         maxDelay: TimeInterval = automationMaxDelay,
         multiplier: Double = 1.5
@@ -373,7 +373,7 @@ extension AccessibilityService {
         var elementStatus = "not_verified"
         if (role ?? title) != nil {
             let findResult = findElement(role: role, title: title, value: nil, appBundleId: appBundleId, timeout: 1.0)
-            elementStatus = findResult.contains("\"success\": true") ? "verified_present" : "not_found_after_action"
+            elementStatus = Self.isSuccessJSON(findResult) ? "verified_present" : "not_found_after_action"
         }
         return successJSON(["action": action, "element_status": elementStatus, "screenshot": screenshotResult])
     }
@@ -433,19 +433,6 @@ extension AccessibilityService {
     @MainActor
     public func findElementGlobally(role: String?, title: String?, value: String?) -> Element? {
         return findAXElement(role: role, title: title, value: value, appBundleId: nil)
-    }
-
-    @MainActor
-    private func searchInElementLegacy(_ root: Element, role: String?, title: String?, value: String?) -> Element? {
-        let results = root.findElements(role: role, title: title, label: nil, value: value, identifier: nil, maxDepth: 100)
-        if results.isEmpty, let title = title {
-            var options = ElementSearchOptions()
-            options.maxDepth = 100
-            options.caseInsensitive = true
-            if let role = role { options.includeRoles = [role] }
-            return root.findElement(matching: title, options: options)
-        }
-        return results.first
     }
 
     // MARK: - Failure Hints

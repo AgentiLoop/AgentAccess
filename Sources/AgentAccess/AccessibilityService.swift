@@ -421,10 +421,22 @@ public final class AccessibilityService: @unchecked Sendable {
     public func successJSON(_ data: Any) -> String {
         if let d = try? JSONSerialization.data(withJSONObject: ["success": true, "data": data], options: .sortedKeys),
            let s = String(data: d, encoding: .utf8) { return s }
-        return "{\"success\": true}"
+        return "{\"success\":true}"
+    }
+
+    /// True when `json` is a result produced by `successJSON`. Parses instead of
+    /// substring-matching so whitespace differences can't cause a false negative.
+    public static func isSuccessJSON(_ json: String) -> Bool {
+        guard let d = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return false }
+        return obj["success"] as? Bool == true
     }
 
     public func errorJSON(_ msg: String) -> String {
-        return "{\"success\": false, \"error\": \"\(msg.replacingOccurrences(of: "\"", with: "\\\""))\"}"
+        // Proper JSON escaping (backslashes, newlines, control chars) — a hand-rolled
+        // quote-only replacement produced invalid JSON for multi-line messages.
+        if let d = try? JSONSerialization.data(withJSONObject: ["success": false, "error": msg], options: .sortedKeys),
+           let s = String(data: d, encoding: .utf8) { return s }
+        return "{\"success\":false,\"error\":\"unknown\"}"
     }
 }
