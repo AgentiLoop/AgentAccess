@@ -9,7 +9,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/AgentiLoop/AgentAudit.git", from: "1.3.1"),
-        .package(url: "https://github.com/steipete/AXorcist.git", from: "0.1.9"),
+        .package(url: "https://github.com/steipete/AXorcist.git", from: "0.1.10"),
     ],
     targets: [
         .target(name: "AgentAccess", dependencies: ["AgentAudit", "AXorcist"]),
