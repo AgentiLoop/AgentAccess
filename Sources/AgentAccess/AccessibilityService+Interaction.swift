@@ -281,6 +281,7 @@ extension AccessibilityService {
                 var options = ElementSearchOptions()
                 options.maxDepth = 20
                 options.caseInsensitive = true
+                options.visibleOnly = true
                 if let role = role { options.includeRoles = [role] }
                 if let match = root.findElement(matching: title, options: options) {
                     found = match

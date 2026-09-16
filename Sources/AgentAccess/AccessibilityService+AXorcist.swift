@@ -424,20 +424,69 @@ extension AccessibilityService {
     // MARK: - Wait Until Actionable
 
     /// Wait for an element to become actionable (enabled, visible, on screen).
+    /// Polls for the element until it appears, then uses AXorcist's
+    /// `Element.waitUntilActionable(timeout:pollInterval:)` for the remaining time.
     @MainActor
-    public func waitUntilActionable(role: String?, title: String?, value: String?, appBundleId: String?, timeout: TimeInterval = 5.0) -> String {
+    public func waitUntilActionable(role: String?, title: String?, value: String?, appBundleId: String?, timeout: TimeInterval = 5.0, pollInterval: TimeInterval = 0.1) async -> String {
         guard Self.hasAccessibilityPermission() else {
             return errorJSON("Accessibility permission required.")
         }
-        guard let found = findAXElement(role: role, title: title, value: value, appBundleId: appBundleId) else {
+        AuditLog.log(.accessibility, "waitUntilActionable(role: \(role ?? "nil"), title: \(title ?? "nil"), app: \(appBundleId ?? "nil"), timeout: \(timeout))")
+
+        let start = Date()
+        var found: Element?
+        while found == nil, Date().timeIntervalSince(start) < timeout {
+            found = findAXElement(role: role, title: title, value: value, appBundleId: appBundleId)
+            if found == nil {
+                try? await Task.sleep(nanoseconds: UInt64(pollInterval * 1_000_000_000))
+            }
+        }
+        guard let element = found else {
+            return errorJSON("Element not found within \(timeout)s")
+        }
+        let remaining = max(timeout - Date().timeIntervalSince(start), pollInterval)
+        do {
+            let ready = try await element.waitUntilActionable(timeout: remaining, pollInterval: pollInterval)
+            return successJSON([
+                "message": "Element is actionable",
+                "waited": Date().timeIntervalSince(start),
+                "properties": elementProperties(ready)
+            ])
+        } catch {
+            return errorJSON("Element is not actionable after \(timeout)s (disabled, hidden, or off-screen)")
+        }
+    }
+
+    // MARK: - Select Text Range
+
+    /// Set the selected text range on a text element using AXorcist's typed
+    /// `Element.setSelectedTextRange(_:)` setter (AXorcist 0.1.7+).
+    @MainActor
+    public func selectTextRange(role: String?, title: String?, value: String?, appBundleId: String?, location: Int, length: Int) -> String {
+        guard Self.hasAccessibilityPermission() else {
+            return errorJSON("Accessibility permission required.")
+        }
+        guard location >= 0, length >= 0 else {
+            return errorJSON("location and length must be >= 0")
+        }
+        AuditLog.log(.accessibility, "selectTextRange(role: \(role ?? "nil"), title: \(title ?? "nil"), app: \(appBundleId ?? "nil"), location: \(location), length: \(length))")
+
+        guard let found = findAXElement(role: role ?? "AXTextField", title: title, value: value, appBundleId: appBundleId)
+                ?? (role == nil ? findAXElement(role: "AXTextArea", title: title, value: value, appBundleId: appBundleId) : nil) else {
             return errorJSON("Element not found")
         }
-        let actionable = found.isActionable()
-        if actionable {
-            return successJSON(["message": "Element is actionable", "properties": elementProperties(found)])
+        let err = found.setSelectedTextRange(CFRange(location: location, length: length))
+        guard err == .success else {
+            return errorJSON("setSelectedTextRange failed: \(err)")
         }
-        return errorJSON("Element is not actionable (disabled, hidden, or off-screen)")
+        var result: [String: Any] = ["message": "Selected range", "location": location, "length": length]
+        if let range = found.selectedTextRange() {
+            result["selectedTextRange"] = ["location": range.location, "length": range.length]
+        }
+        if let text = found.selectedText() { result["selectedText"] = text }
+        return successJSON(result)
     }
+
 
     // MARK: - AXorcist Logs
 

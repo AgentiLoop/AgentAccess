@@ -185,6 +185,7 @@ public final class AccessibilityService: @unchecked Sendable {
             var options = ElementSearchOptions()
             options.maxDepth = 100
             options.caseInsensitive = true
+            options.visibleOnly = true
             if let role = role {
                 options.includeRoles = [role]
             }
