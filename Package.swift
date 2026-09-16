@@ -8,7 +8,7 @@ let package = Package(
         .library(name: "AgentAccess", targets: ["AgentAccess"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/AgentiLoop/AgentAudit.git", from: "1.3.4"),
+        .package(url: "https://github.com/AgentiLoop/AgentAudit.git", from: "1.3.5"),
         .package(url: "https://github.com/steipete/AXorcist.git", from: "0.1.10"),
     ],
     targets: [
