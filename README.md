@@ -6,7 +6,7 @@ macOS Accessibility automation framework. Control any app via the Accessibility 
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/macOS26/AgentAccess.git", from: "1.0.0"),
+    .package(url: "https://github.com/AgentiLoop/AgentAccess.git", from: "2.10.18"),
 ]
 ```
 
@@ -206,7 +206,7 @@ perms.enableAll()
 
 ## Audit Logging
 
-All operations are logged via [AgentAudit](https://github.com/macOS26/AgentAudit) to `os.log`. View in Console.app under subsystem `Agent.app.toddbruss.audit`, category `Accessibility`.
+All operations are logged via [AgentAudit](https://github.com/AgentiLoop/AgentAudit) to `os.log`. View in Console.app under subsystem `Agent.app.toddbruss.audit`, category `Accessibility`.
 
 ## Requirements
 
