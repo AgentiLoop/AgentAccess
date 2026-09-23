@@ -6,7 +6,7 @@ macOS Accessibility automation framework. Control any app via the Accessibility 
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/AgentiLoop/AgentAccess.git", from: "2.10.20"),
+    .package(url: "https://github.com/AgentiLoop/AgentAccess.git", from: "2.10.21"),
 ]
 ```
 

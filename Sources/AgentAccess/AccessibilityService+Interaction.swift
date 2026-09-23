@@ -43,10 +43,11 @@ extension AccessibilityService {
                 success = found.setSize(CGSize(width: w, height: h)) == .success
             } else if let s = val as? String {
                 success = found.setValue(s, forAttribute: key)
-            } else if let b = val as? Bool {
-                success = found.setValue(b, forAttribute: key)
-            } else if let i = val as? Int {
-                success = found.setValue(i, forAttribute: key)
+            } else if let n = val as? NSNumber, CFGetTypeID(n) == CFBooleanGetTypeID() {
+                success = found.setValue(n.boolValue, forAttribute: key)
+            } else if let n = val as? NSNumber {
+                // Preserve 0/1 and floating-point values as numbers (AXorcist 0.1.11+).
+                success = found.setValue(n, forAttribute: key)
             } else {
                 success = found.setValue(String(describing: val), forAttribute: key)
             }
