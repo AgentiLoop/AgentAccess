@@ -416,6 +416,9 @@ extension AccessibilityService {
         do {
             try found.scroll(direction: scrollDir, amount: amount)
             return successJSON(["message": "Scrolled \(direction) by \(amount)"])
+        } catch UIAutomationError.invalidScrollAmount {
+            // AXorcist 0.2.0+ rejects amounts that don't fit the native scroll event range.
+            return errorJSON("Invalid scroll amount \(amount): must fit the native scroll event range")
         } catch {
             return errorJSON("Scroll failed: \(error.localizedDescription)")
         }
