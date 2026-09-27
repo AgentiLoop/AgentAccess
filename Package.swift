@@ -3,12 +3,12 @@ import PackageDescription
 
 let package = Package(
     name: "AgentAccess",
-    platforms: [.macOS(.v26)],
+    platforms: [.macOS(.v14)],
     products: [
         .library(name: "AgentAccess", targets: ["AgentAccess"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/AgentiLoop/AgentAudit.git", from: "1.3.5"),
+        .package(url: "https://github.com/AgentiLoop/AgentAudit.git", from: "1.3.9"),
         .package(url: "https://github.com/steipete/AXorcist.git", from: "0.2.0"),
     ],
     targets: [

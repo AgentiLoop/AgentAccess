@@ -1,13 +1,13 @@
 {
-  "originHash" : "f879e1f237a9dd657cf3203d2566684fe835e95ba35cef2484d6ffc32981e0ad",
+  "originHash" : "fc04be53aef41e2f18d22743eecf8924388b6166aee16c0e4524d98ac19bbfc9",
   "pins" : [
     {
       "identity" : "agentaudit",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/AgentiLoop/AgentAudit.git",
       "state" : {
-        "revision" : "71de8e1dbb06c6e927cf981ed71b3fe5d9987c18",
-        "version" : "1.3.5"
+        "revision" : "db7d4f51148df848f0379d8d8f96e9f503ac9b9e",
+        "version" : "1.3.9"
       }
     },
     {
