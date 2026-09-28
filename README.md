@@ -6,7 +6,7 @@ macOS Accessibility automation framework. Control any app via the Accessibility 
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/AgentiLoop/AgentAccess.git", from: "2.10.21"),
+    .package(url: "https://github.com/AgentiLoop/AgentAccess.git", from: "2.10.24"),
 ]
 ```
 
@@ -206,10 +206,18 @@ perms.enableAll()
 
 ## Audit Logging
 
-All operations are logged via [AgentAudit](https://github.com/AgentiLoop/AgentAudit) to `os.log`. View in Console.app under subsystem `Agent.app.toddbruss.audit`, category `Accessibility`.
+All operations are logged via [AgentAudit](https://github.com/AgentiLoop/AgentAudit) to `os.log`. View in Console.app under subsystem `<host app bundle ID>.audit`, category `Accessibility`.
 
 ## Requirements
 
-- macOS 26+
-- Swift 6.2+
+- macOS 14+
+- Swift 6.4+
 - Accessibility permission (System Settings > Privacy & Security > Accessibility)
+
+## Part of AgentiLoop Agent!
+
+AgentAccess is one of the open-source building blocks of **[AgentiLoop Agent!](https://github.com/AgentiLoop/Agent)**, the native AI agent for macOS 14.6+ on Apple Silicon and Intel. Agent! codes in Xcode, drives any Mac app, runs shell as you or as root, and works with 23 LLM providers plus on-device Apple Intelligence.
+
+🌐 [agentiloop.ai](https://agentiloop.ai/) · ⬇️ [Download Agent!](https://github.com/AgentiLoop/Agent/releases/latest) · 🍺 `brew install --cask agentiloop-agent` · 💻 CLIs: [Rust](https://github.com/AgentiLoop/AgentiLoopCLI) / [Go](https://github.com/AgentiLoop/AgentiLoopGo)
+
+**More Agent! packages:** [AgentAudit](https://github.com/AgentiLoop/AgentAudit) · [AgentColorSyntax](https://github.com/AgentiLoop/AgentColorSyntax) · [AgentD1F](https://github.com/AgentiLoop/AgentD1F) · [AgentEventBridges](https://github.com/AgentiLoop/AgentEventBridges) · [AgentLLM](https://github.com/AgentiLoop/AgentLLM) · [AgentMCP](https://github.com/AgentiLoop/AgentMCP) · [AgentSwift](https://github.com/AgentiLoop/AgentSwift) · [AgentTerminalNeo](https://github.com/AgentiLoop/AgentTerminalNeo) · [AgentTools](https://github.com/AgentiLoop/AgentTools) · [AgentScripts](https://github.com/AgentiLoop/AgentScripts)
