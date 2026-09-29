@@ -15,14 +15,17 @@ public final class AccessibilityService: @unchecked Sendable {
         "com.apple.SafariTechnologyPreview",
     ]
 
+    /// Browser block only applies when Accessibility isn't granted —
+    /// if the user has configured Accessibility, the agent may use it on browsers.
     public static func isBrowser(_ bundleId: String?) -> Bool {
-        guard let bid = bundleId else { return false }
+        guard !hasAccessibilityPermission(), let bid = bundleId else { return false }
         return browserBundleIDs.contains(bid)
     }
 
     @MainActor
     public static func frontmostAppIsBrowser() -> Bool {
-        guard let bid = RunningApplicationHelper.frontmostApplication?.bundleIdentifier else { return false }
+        guard !hasAccessibilityPermission(),
+              let bid = RunningApplicationHelper.frontmostApplication?.bundleIdentifier else { return false }
         return browserBundleIDs.contains(bid)
     }
 
