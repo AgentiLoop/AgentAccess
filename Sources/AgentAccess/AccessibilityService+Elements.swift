@@ -39,7 +39,7 @@ extension AccessibilityService {
         guard let found = findAXElement(role: role, title: title, value: value, appBundleId: appBundleId) else {
             return errorJSON("Element not found")
         }
-        return successJSON(elementProperties(found))
+        return successJSON(propertiesWithReference(found))
     }
 
     // MARK: - Get All Properties

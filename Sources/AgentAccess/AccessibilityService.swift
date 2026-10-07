@@ -151,6 +151,10 @@ public final class AccessibilityService: @unchecked Sendable {
     public func findAXElement(role: String?, title: String?, value: String?, appBundleId: String?) -> Element? {
         // Resolve app name → bundle ID
         let appBundleId = resolveBundleId(appBundleId)
+        // AppleScript-style reference in title: "button 2 of toolbar 1 of window 1".
+        if let el = findByReference(title, appBundleId: appBundleId), role == nil || el.role() == role {
+            return el
+        }
         if let bundleId = appBundleId {
             guard let app = RunningApplicationHelper.applications(withBundleIdentifier: bundleId).first,
                   let appElement = Element.application(for: app) else { return nil }

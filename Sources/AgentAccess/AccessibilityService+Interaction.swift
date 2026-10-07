@@ -73,7 +73,7 @@ extension AccessibilityService {
         let startTime = Date()
         while Date().timeIntervalSince(startTime) < timeout {
             if let found = findAXElement(role: role, title: title, value: value, appBundleId: appBundleId) {
-                return successJSON(elementProperties(found))
+                return successJSON(propertiesWithReference(found))
             }
             Thread.sleep(forTimeInterval: 0.1)
         }
@@ -102,7 +102,7 @@ extension AccessibilityService {
         // kAXFocusedUIElement is the canonical focus attribute — works on both
         // app elements and the system-wide element. Try it first.
         if let focused = root.focusedUIElement() {
-            return successJSON(elementProperties(focused))
+            return successJSON(propertiesWithReference(focused))
         }
         // Fallback: focusedApplicationElement, then its focused child
         if let focusedApp = root.focusedApplicationElement() {
@@ -143,15 +143,23 @@ extension AccessibilityService {
         // produce unbounded JSON.
         var nodeCount = 0
         let maxNodes = 400
-        func describe(_ el: Element, remaining: Int) -> [String: Any] {
+        // Each node carries its AppleScript-style `reference`, built from the parent's,
+        // so any listed element can be clicked/typed/read with title: <reference>.
+        func describe(_ el: Element, siblings: [Element], parentRef: String?, remaining: Int) -> [String: Any] {
             nodeCount += 1
             var props = elementProperties(el)
-            if remaining > 1, nodeCount < maxNodes, let kids = el.children(), !kids.isEmpty {
-                props["children"] = kids.prefix(maxNodes - nodeCount).map { describe($0, remaining: remaining - 1) }
+            let spec = Self.referenceSpec(for: el, among: siblings)
+            let ref = parentRef.map { $0.isEmpty ? spec : "\(spec) of \($0)" } ?? spec
+            if parentRef != nil { props["reference"] = ref }
+            if remaining > 1, nodeCount < maxNodes, let kids = el.children(strict: true), !kids.isEmpty {
+                props["children"] = kids.prefix(maxNodes - nodeCount).map {
+                    describe($0, siblings: kids, parentRef: parentRef == nil ? nil : ref, remaining: remaining - 1)
+                }
             }
             return props
         }
-        let results = children.map { describe($0, remaining: depth) }
+        let rootRef = found.role() == "AXApplication" ? "" : reference(of: found)
+        let results = children.map { describe($0, siblings: children, parentRef: rootRef, remaining: depth) }
         var payload: [String: Any] = ["count": results.count, "children": results]
         if nodeCount >= maxNodes { payload["truncated"] = true }
         return successJSON(payload)
@@ -272,6 +280,12 @@ extension AccessibilityService {
         let startTime = Date()
         var retryDelay: TimeInterval = 0.1
         while Date().timeIntervalSince(startTime) < timeout {
+            // AppleScript-style reference in title: "button 2 of toolbar 1 of window 1".
+            if let title, let specs = Self.parseReference(title),
+               let el = resolveReference(specs, in: root), role == nil || el.role() == role {
+                found = el
+                break
+            }
             let results = root.findElements(role: role, title: title, label: nil, value: value, identifier: nil, maxDepth: 20)
             if let match = results.first(where: { ($0.size()?.width ?? 0) > 0 }) ?? results.first {
                 found = match
