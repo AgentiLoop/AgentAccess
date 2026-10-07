@@ -42,6 +42,7 @@ extension AccessibilityService {
         var chars = 0
         var visited = 0
         var truncated = false
+        var emptyWebAreas = 0
 
         func emit(_ line: String) {
             guard !truncated else { return }
@@ -54,7 +55,9 @@ extension AccessibilityService {
             chars += line.count + 1
         }
 
-        func walk(_ el: Element, depth: Int) {
+        func label(_ r: String) -> String { r.hasPrefix("AX") ? String(r.dropFirst(2)) : r }
+
+        func walk(_ el: Element, depth: Int, inWeb: Bool) {
             guard !truncated, depth <= maxDepth, visited < 8000 else {
                 if visited >= 8000 { truncated = true }
                 return
@@ -74,17 +77,73 @@ extension AccessibilityService {
                 return
             }
 
-            if let text = Self.ownText(el, role: r) {
-                emit("\(r.hasPrefix("AX") ? String(r.dropFirst(2)) : r): \(text)")
-            }
+            var own = Self.ownText(el, role: r)
+            // Web group labels can span lines ("Small\nStandard\nLarge").
+            if inWeb { own = own.map { Self.joinInline([$0]) }.flatMap { $0.isEmpty ? nil : $0 } }
+            if let own { emit("\(label(r)): \(own)") }
             // strict: AXChildren only, in reading order — the alternative
             // attributes (AXRows, AXVisibleChildren, …) would read rows twice.
-            for child in el.children(strict: true) ?? [] {
-                walk(child, depth: depth + 1)
+            let children = el.children(strict: true) ?? []
+            let web = inWeb || r == "AXWebArea"
+            if r == "AXWebArea" && children.isEmpty { emptyWebAreas += 1 }
+            guard web else {
+                for child in children { walk(child, depth: depth + 1, inWeb: false) }
+                return
             }
+
+            // Web content: a paragraph is a run of sibling text nodes and links —
+            // join them into one line instead of one line per fragment, and drop
+            // the StaticText that only repeats its link/heading/button's label.
+            var run: [String] = []
+            var runIsSingleLink = false
+            func flush() {
+                defer { run = []; runIsSingleLink = false }
+                let text = Self.joinInline(run)
+                guard !text.isEmpty, text != own else { return }
+                // A visible label right after its control ("RadioButton: Small [off]" + "Small").
+                if let last = lines.last, let colon = last.range(of: ": ") {
+                    let lastText = last[colon.upperBound...]
+                    if lastText == text || lastText.hasPrefix(text + " [") { return }
+                }
+                let kind = runIsSingleLink && run.count == 1 ? "Link" : (own == nil && r == "AXHeading" ? "Heading" : "Text")
+                emit("\(kind): \(text)")
+            }
+            let roles = children.map { $0.role() ?? "" }
+            func isTextNode(_ i: Int) -> Bool {
+                i >= 0 && i < roles.count && (roles[i] == "AXStaticText" || roles[i] == "AXLink")
+            }
+            for (i, child) in children.enumerated() {
+                let cr = roles[i]
+                // <b>/<i>/<code>/<sup> spans are untitled AXGroups sitting among text nodes.
+                let inlineGroup = cr == "AXGroup"
+                    && (isTextNode(i - 1) || isTextNode(i + 1) || (child.subrole() ?? "").hasSuffix("StyleGroup"))
+                    && Self.isInlineSpan(child)
+                if cr == "AXStaticText" || cr == "AXLink" || inlineGroup {
+                    if child.isHidden() == true { continue }
+                    visited += 1
+                    let t = Self.inlineText(child, role: cr)
+                    if t.isEmpty { continue }
+                    if run.isEmpty { runIsSingleLink = cr == "AXLink" }
+                    run.append(t)
+                } else {
+                    flush()
+                    walk(child, depth: depth + 1, inWeb: true)
+                }
+            }
+            flush()
         }
 
-        walk(root, depth: 0)
+        walk(root, depth: 0, inWeb: false)
+        // WebKit/Chromium build a page's accessibility tree lazily: the first
+        // query can find an empty web area. Give it a moment and read again.
+        var retries = 0
+        while emptyWebAreas > 0 && retries < 6 && !truncated {
+            retries += 1
+            Thread.sleep(forTimeInterval: 0.4)
+            lines = []; chars = 0; visited = 0; emptyWebAreas = 0
+            walk(root, depth: 0, inWeb: false)
+        }
+
 
         var result: [String: Any] = [
             "root": [root.role() ?? "", root.title() ?? ""].filter { !$0.isEmpty }.joined(separator: " "),
@@ -124,6 +183,66 @@ extension AccessibilityService {
         default:
             return title ?? stringValue
         }
+    }
+
+    /// Text of an inline web node: a text run's value, or a link's visible text
+    /// (its StaticText descendants, falling back to its label for image links).
+    @MainActor
+    static func inlineText(_ el: Element, role: String) -> String {
+        if role == "AXStaticText" {
+            return (el.value() as? String) ?? el.title() ?? ""
+        }
+        var parts: [String] = []
+        func collect(_ e: Element, depth: Int) {
+            guard depth <= 6, parts.count < 60 else { return }
+            for c in e.children(strict: true) ?? [] {
+                if c.role() == "AXStaticText", let v = (c.value() as? String) ?? c.title() {
+                    parts.append(v)
+                } else {
+                    collect(c, depth: depth + 1)
+                }
+            }
+        }
+        collect(el, depth: 0)
+        let text = joinInline(parts)
+        if !text.isEmpty { return text }
+        return [el.title(), el.descriptionText()].compactMap { $0 }.first { !$0.isEmpty } ?? ""
+    }
+
+    /// An untitled group holding nothing but text runs, links and more such
+    /// groups — a styled inline span rather than a block.
+    @MainActor
+    static func isInlineSpan(_ el: Element) -> Bool {
+        if [el.title(), el.descriptionText()].contains(where: { !($0 ?? "").isEmpty }) { return false }
+        var nodes = 0
+        func ok(_ e: Element, depth: Int) -> Bool {
+            guard depth <= 4 else { return false }
+            for c in e.children(strict: true) ?? [] {
+                nodes += 1
+                guard nodes <= 30 else { return false }
+                switch c.role() ?? "" {
+                case "AXStaticText": continue
+                case "AXLink", "AXGroup": if !ok(c, depth: depth + 1) { return false }
+                default: return false
+                }
+            }
+            return true
+        }
+        return ok(el, depth: 0)
+    }
+
+    /// Join web text fragments the way the page renders them: fragments carry
+    /// their own spacing, except adjacent words split across nodes.
+    static func joinInline(_ parts: [String]) -> String {
+        var out = ""
+        for p in parts where !p.isEmpty {
+            if let last = out.last, let first = p.first,
+               (last.isLetter || last.isNumber), (first.isLetter || first.isNumber) {
+                out += " "
+            }
+            out += p
+        }
+        return out.split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
 
     /// Texts of a table/outline row's cells, in column order.
