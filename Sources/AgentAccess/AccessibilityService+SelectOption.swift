@@ -38,14 +38,20 @@ extension AccessibilityService {
         case "AXCheckBox", "AXSwitch", "AXRadioButton":
             return setToggle(el, label: label, option: option)
         case "AXSlider", "AXIncrementor", "AXLevelIndicator":
-            guard let n = Double(option.trimmingCharacters(in: .whitespaces)) else {
+            guard Double(option.trimmingCharacters(in: .whitespaces)) != nil else {
                 return errorJSON("\(elRole) needs a number, got '\(option)'")
             }
-            guard el.setValue(NSNumber(value: n), forAttribute: "AXValue") else {
-                return errorJSON("Could not set \(elRole) '\(label)' to \(option)")
+            // Same path as set_properties: set, read back, step with AXIncrement/AXDecrement if ignored.
+            let r = setAXProperty(el, key: "AXValue", value: option)
+            let status = r["status"] as? String ?? "failed"
+            let now = r["after"].map { "\($0)" } ?? "?"
+            guard ["set", "adjusted", "unchanged"].contains(status) else {
+                return errorJSON("Could not set \(elRole) '\(label)' to \(option): \(r["error"] as? String ?? status)")
             }
-            let now = (el.value() as? NSNumber).map { "\($0)" } ?? "?"
-            return successJSON(["message": "Set \(elRole) '\(label)' to \(now)", "value": now])
+            var out: [String: Any] = ["message": "Set \(elRole) '\(label)' to \(now)", "value": now, "status": status]
+            if let via = r["via"] { out["via"] = via }
+            if let note = r["note"] { out["note"] = note }
+            return successJSON(out)
         case "AXTextField", "AXTextArea", "AXSearchField":
             guard el.setValue(option, forAttribute: "AXValue") else {
                 return errorJSON("Could not set text of \(elRole) '\(label)'")
@@ -139,7 +145,7 @@ extension AccessibilityService {
     /// Open the element's menu and press the item matching `option`.
     /// `option` may be a path into submenus: "Text > Bold" picks "Bold" in the "Text" submenu.
     @MainActor
-    private func pickFromMenu(_ el: Element, role: String, label: String, option: String) -> String {
+    func pickFromMenu(_ el: Element, role: String, label: String, option: String) -> String {
         let pid = el.pid() ?? 0
         let isWeb = Self.isInWebArea(el)
         // Menu items: titled AXMenuItems; Chrome web <select> items have an empty title and

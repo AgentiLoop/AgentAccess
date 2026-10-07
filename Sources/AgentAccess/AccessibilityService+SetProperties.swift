@@ -166,6 +166,94 @@ extension AccessibilityService {
         let role = element.role() ?? ""
         var applied: Bool
 
+        // Pop-up / menu button: its AXValue can't be written (AppleScript can't `set value` of one
+        // either — it clicks `menu item "X" of menu 1 of pop up button 1`), so pick the menu item.
+        if attr == "AXValue", ["AXPopUpButton", "AXMenuButton"].contains(role) {
+            let want = (value as? String) ?? "\(value)"
+            if let have = before.map({ Self.describeAXValue($0) }) as? String,
+               have.caseInsensitiveCompare(want) == .orderedSame {
+                result["status"] = "unchanged"
+                result["after"] = have
+                return result
+            }
+            let label = [element.title(), element.descriptionText()].compactMap { $0 }.first { !$0.isEmpty } ?? role
+            let picked = pickFromMenu(element, role: role, label: label, option: want)
+            let r = (try? JSONSerialization.jsonObject(with: Data(picked.utf8))) as? [String: Any] ?? [:]
+            result["after"] = Self.describeAXValue(element.rawAttributeValue(named: attr))
+            result["via"] = "menu item"
+            if r["success"] as? Bool == true {
+                result["status"] = "set"
+                if let sel = r["selected"] { result["selected"] = sel }
+            } else {
+                result["status"] = "failed"
+                result["error"] = r["error"] as? String ?? picked
+            }
+            return result
+        }
+
+        // Slider / stepper: set AXValue, and when the app ignores or rejects it, step there with
+        // AXIncrement / AXDecrement (what a user does with arrow keys).
+        if attr == "AXValue", ["AXSlider", "AXIncrementor"].contains(role), let want = Self.coercedNumber(value) {
+            func current() -> Double? { element.rawAttributeValue(named: attr).flatMap { Self.coercedNumber($0 as Any) } }
+            let have = current()
+            if let have, abs(have - want) < 1e-9 {
+                result["status"] = "unchanged"
+                result["after"] = Self.describeAXValue(before)
+                return result
+            }
+            if settable, element.setValue(target, forAttribute: attr) {
+                let deadline = Date().addingTimeInterval(0.5)
+                while Date() < deadline, current().map({ abs($0 - want) >= 1e-9 }) ?? true {
+                    RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+                }
+            }
+            var now = current()
+            if let n = now, n != have, abs(n - want) < 1e-9 || !element.isActionSupported(AXAction.increment.rawValue) {
+                result["after"] = Self.describeAXValue(element.rawAttributeValue(named: attr))
+                result["status"] = abs(n - want) < 1e-9 ? "set" : "adjusted"
+                if abs(n - want) >= 1e-9 { result["note"] = "The control snapped to \(n)" }
+                return result
+            }
+            var steps = 0
+            if var cur = now {
+                let up = want > cur
+                while steps < 500, abs(cur - want) >= 1e-9 {
+                    guard (try? element.performAction(up ? .increment : .decrement)) != nil else { break }
+                    steps += 1
+                    var next = current()
+                    let deadline = Date().addingTimeInterval(0.3)
+                    while next == cur, Date() < deadline {
+                        RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+                        next = current()
+                    }
+                    guard let n = next, n != cur else { break }
+                    if up ? n > want : n < want {
+                        // Overshot: step back when the previous value was closer.
+                        if abs(cur - want) < abs(n - want), (try? element.performAction(up ? .decrement : .increment)) != nil {
+                            steps += 1
+                            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+                            cur = current() ?? cur
+                        } else { cur = n }
+                        break
+                    }
+                    cur = n
+                }
+                now = current()
+            }
+            result["after"] = Self.describeAXValue(element.rawAttributeValue(named: attr))
+            if let n = now, abs(n - want) < 1e-9 {
+                result["status"] = "set"
+            } else if let n = now, n != have {
+                result["status"] = "adjusted"
+                result["note"] = "Nearest step to \(want) is \(n)"
+            } else {
+                result["status"] = settable ? "no effect" : "not settable"
+                result["error"] = "\(role) didn't move to \(want) (AXValue set and AXIncrement/AXDecrement both ignored)"
+            }
+            if steps > 0 { result["via"] = "AXIncrement/AXDecrement ×\(steps)" }
+            return result
+        }
+
         // Checkbox / switch / radio button: press it when the state differs (AppleScript `click checkbox`).
         // Their AXValue is often read-only — or reported settable while writes are silently ignored
         // (TextEdit Settings checkboxes), so pressing is the only reliable route.
