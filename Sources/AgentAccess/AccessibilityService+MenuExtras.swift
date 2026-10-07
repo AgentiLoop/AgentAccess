@@ -100,10 +100,38 @@ extension AccessibilityService {
         let rest = Array(menuPath.dropFirst())
         let menu = (extra.children(strict: true) ?? []).first { $0.role() == "AXMenu" }
 
+        // Popover/panel (Control Center modules, etc.): the panel is often another
+        // process (MenuBarAgent's Wi‑Fi extra opens a Control Center window) — ask
+        // whoever owns the screen just below the extra.
+        var panelApps = [owner]
+        if menu == nil, let f = extra.frame(),
+           let pid = Element.elementAtPoint(CGPoint(x: f.midX, y: f.maxY + 40))?.pid(),
+           pid != owner.pid(), let panelApp = Element.application(for: pid) {
+            panelApps.insert(panelApp, at: 0)
+        }
+
         if rest.isEmpty {
             var result: [String: Any] = ["message": "Opened menu-bar extra '\(extraName)'", "matched": extraName]
             if let menu {
                 result["items"] = (menu.children(strict: true) ?? []).compactMap { $0.title() }.filter { !$0.isEmpty }
+            } else {
+                // A panel: return what it shows (AppleScript can't read these at all),
+                // so one call both opens and reads it. Panels hang from the menu bar.
+                let barBottom = extra.frame()?.maxY ?? 40
+                let panels = panelApps.flatMap { $0.windows() ?? [] }
+                    .filter { w in
+                        guard let f = w.frame() else { return false }
+                        // Hangs from the menu bar, and isn't the menu-bar strip itself.
+                        return f.minY <= barBottom + 20 && f.height > barBottom + 20
+                    }
+                let texts = panels.compactMap { w -> String? in
+                    let t = readTextResult(w, maxChars: 6000)["text"] as? String ?? ""
+                    return t.isEmpty ? nil : t
+                }
+                if !texts.isEmpty {
+                    result["text"] = texts.joined(separator: "\n")
+                    result["message"] = "Opened menu-bar extra '\(extraName)' — panel contents in text; add a name to menuPath to press a control in it"
+                }
             }
             return successJSON(result)
         }
@@ -138,15 +166,7 @@ extension AccessibilityService {
             }
         }
 
-        // Popover/panel (Control Center modules, etc.): find each name in the panel's
-        // windows. The panel is often another process (MenuBarAgent's Wi‑Fi extra opens
-        // a Control Center window) — ask whoever owns the screen just below the extra.
-        var panelApps = [owner]
-        if let f = extra.frame(),
-           let pid = Element.elementAtPoint(CGPoint(x: f.midX, y: f.maxY + 40))?.pid(),
-           pid != owner.pid(), let panelApp = Element.application(for: pid) {
-            panelApps.insert(panelApp, at: 0)
-        }
+        // Popover/panel: find each name in the panel's windows.
         for (i, name) in rest.enumerated() {
             if i > 0 { Thread.sleep(forTimeInterval: 0.35) }
             let windows = panelApps.flatMap { $0.windows() ?? [] }

@@ -41,7 +41,17 @@ extension AccessibilityService {
             }
             root = window ?? appElement
         }
+        let result = readTextResult(root, maxDepth: maxDepth, maxChars: maxChars)
+        if (result["lines"] as? Int ?? 0) == 0 {
+            return errorJSON("No text found in \(result["root"] as? String ?? "element")")
+        }
+        return successJSON(result)
+    }
 
+    /// Walk `root` and return {root, lines, text, truncated?} — read_text's reader,
+    /// shared with panels opened from the menu bar.
+    @MainActor
+    func readTextResult(_ root: Element, maxDepth: Int = 40, maxChars: Int = 20000) -> [String: Any] {
         var lines: [String] = []
         var chars = 0
         var visited = 0
@@ -162,10 +172,7 @@ extension AccessibilityService {
             "text": lines.joined(separator: "\n"),
         ]
         if truncated { result["truncated"] = true }
-        if lines.isEmpty {
-            return errorJSON("No text found in \(result["root"] as? String ?? "element")")
-        }
-        return successJSON(result)
+        return result
     }
 
     /// Text an element shows by itself (not counting children), with state for toggles.
