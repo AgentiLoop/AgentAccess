@@ -34,28 +34,19 @@ extension AccessibilityService {
         var successCount = 0
 
         for (key, val) in properties {
-            var success = false
-            if key == "AXPosition", let dict = val as? [String: CGFloat],
-               let px = dict["x"], let py = dict["y"] {
-                success = found.setPosition(CGPoint(x: px, y: py)) == .success
-            } else if key == "AXSize", let dict = val as? [String: CGFloat],
-                      let w = dict["width"], let h = dict["height"] {
-                success = found.setSize(CGSize(width: w, height: h)) == .success
-            } else if let s = val as? String {
-                success = found.setValue(s, forAttribute: key)
-            } else if let n = val as? NSNumber, CFGetTypeID(n) == CFBooleanGetTypeID() {
-                success = found.setValue(n.boolValue, forAttribute: key)
-            } else if let n = val as? NSNumber {
-                // Preserve 0/1 and floating-point values as numbers (AXorcist 0.1.11+).
-                success = found.setValue(n, forAttribute: key)
-            } else {
-                success = found.setValue(String(describing: val), forAttribute: key)
-            }
-            results[key] = success ? "set" : "failed"
-            if success { successCount += 1 }
+            let r = setAXProperty(found, key: key, value: val)
+            results[key] = r
+            if let status = r["status"] as? String, ["set", "adjusted", "unchanged"].contains(status) { successCount += 1 }
         }
 
-        return successJSON(["message": "Set \(successCount)/\(properties.count) properties", "results": results])
+        var out: [String: Any] = ["message": "Set \(successCount)/\(properties.count) properties", "results": results]
+        if let ref = reference(of: found) { out["reference"] = ref }
+        if successCount == properties.count { return successJSON(out) }
+        out["success"] = false
+        out["error"] = "Set \(successCount)/\(properties.count) properties"
+        if let d = try? JSONSerialization.data(withJSONObject: out, options: .sortedKeys),
+           let s = String(data: d, encoding: .utf8) { return s }
+        return errorJSON("Set \(successCount)/\(properties.count) properties")
     }
 
     // MARK: - Find Element
