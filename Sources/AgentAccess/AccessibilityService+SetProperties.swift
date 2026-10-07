@@ -163,11 +163,13 @@ extension AccessibilityService {
         }
         var result: [String: Any] = ["attribute": attr, "before": Self.describeAXValue(before)]
         let settable = element.isAttributeSettable(named: attr)
-        var applied = element.setValue(target, forAttribute: attr)
-
-        // Checkbox / switch / radio button: AXValue is often read-only — press it when the state differs.
         let role = element.role() ?? ""
-        if !applied, attr == "AXValue", ["AXCheckBox", "AXRadioButton", "AXSwitch"].contains(role),
+        var applied: Bool
+
+        // Checkbox / switch / radio button: press it when the state differs (AppleScript `click checkbox`).
+        // Their AXValue is often read-only — or reported settable while writes are silently ignored
+        // (TextEdit Settings checkboxes), so pressing is the only reliable route.
+        if attr == "AXValue", ["AXCheckBox", "AXRadioButton", "AXSwitch"].contains(role),
            let want = Self.coercedNumber(value), let have = before.flatMap({ Self.coercedNumber($0 as Any) })
         {
             if (want != 0) == (have != 0) {
@@ -182,7 +184,9 @@ extension AccessibilityService {
                 return result
             }
             applied = (try? element.performAction(.press)) != nil
-            if applied { result["via"] = "AXPress" }
+            if applied { result["via"] = "AXPress" } else { applied = element.setValue(target, forAttribute: attr) }
+        } else {
+            applied = element.setValue(target, forAttribute: attr)
         }
 
         guard applied else {
@@ -203,7 +207,7 @@ extension AccessibilityService {
         }
         result["after"] = Self.describeAXValue(after)
         if let after, CFEqual(after, target) {
-            result["status"] = "set"
+            result["status"] = before.map { CFEqual($0, target) } ?? false ? "unchanged" : "set"
         } else if let after, let before, CFEqual(after, before) {
             result["status"] = "no effect"
             result["error"] = "The app accepted the value but \(attr) didn't change"
