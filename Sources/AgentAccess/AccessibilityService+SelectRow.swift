@@ -22,12 +22,12 @@ extension AccessibilityService {
         }
         AuditLog.log(.accessibility, "selectRow(role: \(role ?? "nil"), title: \(title ?? "nil"), row: \(rowText), open: \(open), app: \(appBundleId ?? "frontmost"))")
 
-        let scope: Element
+        var scopes: [Element] = []
         if role != nil || title != nil || value != nil {
             guard let found = findAXElement(role: role, title: title, value: value, appBundleId: appBundleId) else {
                 return errorJSON("Element not found: role=\(role ?? "any"), title=\(title ?? "any")")
             }
-            scope = found
+            scopes = [found]
         } else {
             let bundleId = resolveBundleId(appBundleId)
             let runningApp = bundleId.flatMap { RunningApplicationHelper.applications(withBundleIdentifier: $0).first }
@@ -35,12 +35,19 @@ extension AccessibilityService {
             guard let app = runningApp, let appElement = Element.application(for: app) else {
                 return errorJSON("App not running or not answering accessibility queries: \(appBundleId ?? "frontmost")")
             }
-            scope = appElement.focusedWindow() ?? appElement.mainWindow() ?? appElement.windows()?.first ?? appElement
+            if let window = appElement.focusedWindow() ?? appElement.mainWindow() ?? appElement.windows()?.first {
+                scopes.append(window)
+            }
+            // App-level content that isn't a window — Finder's desktop is
+            // `scroll area "desktop"` of the app, holding the desktop icons.
+            scopes += (appElement.children(strict: true) ?? []).filter { $0.role() == "AXScrollArea" }
+            if scopes.isEmpty { scopes = [appElement] }
         }
-        // Every table/outline/list in scope, biggest first (main content before sidebar).
-        let containers = Self.rowContainers(in: scope)
+        // Every table/outline/list/icon view in scope, biggest first (main content
+        // before sidebar), the front window before the desktop.
+        let containers = scopes.flatMap { Self.rowContainers(in: $0) }
         guard !containers.isEmpty else {
-            return errorJSON("No table, outline or list found")
+            return errorJSON("No table, outline, list or icon view found")
         }
 
         let want = rowText.lowercased().trimmingCharacters(in: .whitespaces)
@@ -65,22 +72,34 @@ extension AccessibilityService {
 
         _ = AXUIElementPerformAction(pick.underlyingElement, "AXScrollToVisible" as CFString)
         func isSelected() -> Bool { pick.attribute(Attribute<Bool>("AXSelected")) ?? false }
+        var clickBlocked: String?
         if !isSelected() {
             // Rows of NSTableView/NSOutlineView accept AXSelected; fall back to the
             // container's AXSelectedRows, then a plain click.
+            // Icon views (Finder desktop) only take AXSelectedChildren on the group;
+            // AX reports success for attributes an element lacks, so set by role.
             if !pick.setValue(true, forAttribute: "AXSelected") {
-                _ = container.setValue([pick.underlyingElement] as CFArray, forAttribute: "AXSelectedRows")
+                let attr = container.role() == "AXGroup" ? "AXSelectedChildren" : "AXSelectedRows"
+                _ = container.setValue([pick.underlyingElement] as CFArray, forAttribute: attr)
             }
             let deadline = Date().addingTimeInterval(1.0)
             while !isSelected(), Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
-            if !isSelected() {
-                _ = try? pick.click()
-                let d2 = Date().addingTimeInterval(1.0)
-                while !isSelected(), Date() < d2 { Thread.sleep(forTimeInterval: 0.05) }
+            if !isSelected(), let pid = pick.pid() {
+                // Mouse only when the click lands on the row/icon itself — a desktop
+                // icon behind a window would otherwise click that window.
+                if let reason = Self.mouseClickBlocker(pick, pid: pid) {
+                    clickBlocked = reason
+                } else {
+                    _ = try? pick.click()
+                    let d2 = Date().addingTimeInterval(1.0)
+                    while !isSelected(), Date() < d2 { Thread.sleep(forTimeInterval: 0.05) }
+                }
             }
         }
-        guard isSelected() else {
-            return errorJSON("Found row '\(cells)' but could not select it")
+        let selected = isSelected()
+        // Opening doesn't need the selection: AXOpen works on covered desktop icons.
+        guard selected || (open && pick.isActionSupported("AXOpen")) else {
+            return errorJSON("Found row '\(cells)' but could not select it" + (clickBlocked.map { " — \($0); bring its window forward or use open:true" } ?? ""))
         }
         var result: [String: Any] = ["message": "Selected row '\(cells)' in \(containerRole)", "row": cells]
 
@@ -92,7 +111,7 @@ extension AccessibilityService {
                     return errorJSON("Selected row '\(cells)' but could not open it: \(error.localizedDescription)")
                 }
             }
-            result["message"] = "Selected and opened row '\(cells)' in \(containerRole)"
+            result["message"] = "\(selected ? "Selected and opened" : "Opened") row '\(cells)' in \(containerRole)"
             result["opened"] = true
         }
         return successJSON(result)
@@ -111,6 +130,13 @@ extension AccessibilityService {
             visited += 1
             if cur.isHidden() == true { continue }
             if let r = cur.role(), containers.contains(r) {
+                found.append(cur)
+                continue
+            }
+            // Icon views (Finder desktop / icon-view windows): a group of AXImage
+            // items that carry AXSelected — the icon-view counterpart of a list.
+            if cur.role() == "AXGroup", let kids = cur.children(strict: true),
+               kids.contains(where: { $0.role() == "AXImage" && $0.attribute(Attribute<Bool>("AXSelected")) != nil }) {
                 found.append(cur)
                 continue
             }
