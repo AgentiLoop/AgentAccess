@@ -310,22 +310,10 @@ extension AccessibilityService {
             Thread.sleep(forTimeInterval: 0.2)
         }
 
-        // Step 4: Click via AXorcist — Element.click() first (centers in frame),
-        // then AXPress as a fallback for menu items and other AXPress-only elements.
-        // No coordinate-based fallback: if both AXorcist paths fail, the element is
-        // genuinely not clickable through accessibility, and a raw mouse event would
-        // just produce the wrong result anyway.
-        do {
-            try element.click()
-            return successJSON(["message": "Clicked element", "element": elementProperties(element)])
-        } catch {
-            do {
-                try element.performAction(.press)
-                return successJSON(["message": "Pressed element", "element": elementProperties(element)])
-            } catch {
-                return errorJSON("Element is not clickable through accessibility (Element.click and AXPress both failed) for \(element.role() ?? "unknown") '\(element.title() ?? "")'. Verify the element is enabled and visible, or look for a different actionable element nearby.")
-            }
-        }
+        // Step 4: AXPress first (like AppleScript's `click`: works scrolled off-screen or
+        // behind other windows, no mouse movement); a hit-tested mouse click only when
+        // the element has no AXPress. Result carries a before/after change report.
+        return pressWithEvidence(element, verify: verify)
     }
 
     // MARK: - Adaptive Wait for Element
