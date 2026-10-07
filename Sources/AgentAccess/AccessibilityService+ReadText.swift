@@ -35,7 +35,11 @@ extension AccessibilityService {
             guard let appElement = Element.application(for: app) else {
                 return errorJSON("\(app.localizedName ?? appBundleId ?? "App") is running but not answering accessibility queries (busy or hung)")
             }
-            root = appElement.focusedWindow() ?? appElement.mainWindow() ?? appElement.windows()?.first ?? appElement
+            let window = appElement.focusedWindow() ?? appElement.mainWindow() ?? appElement.windows()?.first
+            if let window {
+                wakeAccessibilityTree(appElement) { !Self.hasHollowContent(window) }
+            }
+            root = window ?? appElement
         }
 
         var lines: [String] = []
@@ -44,8 +48,15 @@ extension AccessibilityService {
         var truncated = false
         var emptyWebAreas = 0
 
-        func emit(_ line: String) {
+        // One huge text area (Agent!'s activity log, a long document) used to
+        // eat the whole budget and hide every control after it — clip it.
+        let perLine = max(1500, maxChars / 5)
+        func emit(_ rawLine: String, clip: Bool = true) {
             guard !truncated else { return }
+            var line = rawLine
+            if clip, line.count > perLine {
+                line = String(line.prefix(perLine)) + "… [+\(line.count - perLine) chars; read_text with this element's role/title for all of it]"
+            }
             if lines.last == line { return }
             if chars + line.count > maxChars {
                 truncated = true
@@ -80,7 +91,7 @@ extension AccessibilityService {
             var own = Self.ownText(el, role: r)
             // Web group labels can span lines ("Small\nStandard\nLarge").
             if inWeb { own = own.map { Self.joinInline([$0]) }.flatMap { $0.isEmpty ? nil : $0 } }
-            if let own { emit("\(label(r)): \(own)") }
+            if let own { emit("\(label(r)): \(own)", clip: depth > 0) }
             // strict: AXChildren only, in reading order — the alternative
             // attributes (AXRows, AXVisibleChildren, …) would read rows twice.
             let children = el.children(strict: true) ?? []

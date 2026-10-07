@@ -158,10 +158,10 @@ public final class AccessibilityService: @unchecked Sendable {
         if let bundleId = appBundleId {
             guard let app = RunningApplicationHelper.applications(withBundleIdentifier: bundleId).first,
                   let appElement = Element.application(for: app) else { return nil }
-            return searchInElement(appElement, role: role, title: title, value: value)
+            return searchWaking(appElement, role: role, title: title, value: value)
         } else if let frontApp = RunningApplicationHelper.frontmostApplication,
                   let appElement = Element.application(for: frontApp) {
-            return searchInElement(appElement, role: role, title: title, value: value)
+            return searchWaking(appElement, role: role, title: title, value: value)
         }
         // Global search across all running apps
         for app in RunningApplicationHelper.filteredApplications(options: .init(excludeProhibitedApps: true)) {
@@ -174,10 +174,25 @@ public final class AccessibilityService: @unchecked Sendable {
         return nil
     }
 
+    /// searchInElement, and on a miss in an app whose document content is still
+    /// hollow (Pages canvas), wake its accessibility tree and search again.
+    @MainActor
+    func searchWaking(_ appElement: Element, role: String?, title: String?, value: String?) -> Element? {
+        if let found = searchInElement(appElement, role: role, title: title, value: value) { return found }
+        var found: Element?
+        wakeAccessibilityTree(appElement) {
+            found = searchInElement(appElement, role: role, title: title, value: value)
+            return found != nil
+        }
+        return found
+    }
+
     /// Search within an Element hierarchy using AXorcist's flexible matching.
     @MainActor
     func searchInElement(_ root: Element, role: String?, title: String?, value: String?) -> Element? {
-        // Use AXorcist's findElements for multi-criteria search
+        // Use AXorcist's findElements for multi-criteria search. Live UIs (SwiftUI
+        // logs, streaming text) destroy elements mid-walk — drop the dead ones
+        // (kAXErrorInvalidUIElement: no role) instead of returning an empty match.
         let results = root.findElements(
             role: role,
             title: title,
@@ -185,10 +200,9 @@ public final class AccessibilityService: @unchecked Sendable {
             value: value,
             identifier: nil,
             maxDepth: 100
-        )
-        // If title search by exact match failed, try description-based search
-        if results.isEmpty, let title = title {
-            // Fall back to AXorcist's string-based search which checks description, help, etc.
+        ).filter { $0.role() != nil }
+        // Fall back to AXorcist's string-based search which checks description, help, etc.
+        func looseSearch(_ title: String) -> Element? {
             var options = ElementSearchOptions()
             options.maxDepth = 100
             options.caseInsensitive = true
@@ -196,9 +210,49 @@ public final class AccessibilityService: @unchecked Sendable {
             if let role = role {
                 options.includeRoles = [role]
             }
-            return root.findElement(matching: title, options: options)
+            return root.findElement(matching: title, options: options).flatMap { $0.role() == nil ? nil : $0 }
         }
-        return results.first
+        // If title search by exact match failed, try description-based search
+        if results.isEmpty, let title = title {
+            return looseSearch(title)
+        }
+        guard let best = results.count > 1
+            ? results.enumerated().min(by: { a, b in
+                let ra = matchRank(a.element, in: root), rb = matchRank(b.element, in: root)
+                return ra != rb ? ra < rb : a.offset < b.offset
+            })?.element
+            : results.first else { return nil }
+        // Only a menu item has that exact title (Finder "Desktop" = Go > Desktop):
+        // a visible element named or described that way (the desktop, a sidebar
+        // row) is what a person means — the menu item is the last resort.
+        if role == nil, let title, matchRank(best, in: root) == 3,
+           let loose = looseSearch(title), matchRank(loose, in: root) < 3 {
+            return loose
+        }
+        return best
+    }
+
+    /// Several elements share the name (Finder: Go > Desktop menu item, sidebar
+    /// "Desktop", the desktop itself). Tree order puts the menu bar first, so the
+    /// first hit was usually a menu item in a closed menu. Rank like a person
+    /// would: 0 the focused window, 1 other windows / the desktop, 2 hidden, 3 menus.
+    @MainActor
+    func matchRank(_ el: Element, in root: Element) -> Int {
+        var window: Element?
+        var cur: Element? = el
+        var steps = 0
+        while let c = cur, steps < 80 {
+            let r = c.role() ?? ""
+            if r == "AXMenuBar" || r == "AXMenu" || r == "AXMenuItem" || r == "AXMenuBarItem" { return 3 }
+            if r == "AXWindow" { window = c; break }
+            cur = c.parent()
+            steps += 1
+        }
+        // Hidden or collapsed (Pages' empty "Left Header" text area is 1pt wide).
+        if el.isHidden() == true { return 2 }
+        if let s = el.size(), s.width < 4 || s.height < 4 { return 2 }
+        if let w = window, let f = root.focusedWindow(), w == f { return 0 }
+        return 1
     }
 
     /// Convert an AXorcist Element's properties to a dictionary for JSON output.
