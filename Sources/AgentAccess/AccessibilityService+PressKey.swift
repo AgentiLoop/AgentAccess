@@ -127,6 +127,13 @@ extension AccessibilityService {
         if let el = focusedTarget { info["focused_first"] = elementProperties(el) }
         info["before"] = before.dictionary
         info["after"] = after.dictionary
+        info["changed"] = Self.describeChanges(before: before, after: after)
+        return successJSON(info)
+    }
+
+    // MARK: - Snapshot
+
+    static func describeChanges(before: FocusSnapshot, after: FocusSnapshot) -> String {
         var changes: [String] = []
         if before.frontApp != after.frontApp { changes.append("frontmost app → \(after.frontApp)") }
         if before.window != after.window { changes.append("window → \"\(after.window)\"") }
@@ -134,11 +141,8 @@ extension AccessibilityService {
         if before.sheetCount != after.sheetCount { changes.append("sheets \(before.sheetCount) → \(after.sheetCount)") }
         if before.focus != after.focus { changes.append("focus → \(after.focus)") }
         if before.value != after.value { changes.append("focused value changed") }
-        info["changed"] = changes.isEmpty ? "nothing visible changed (the key may still have worked, e.g. a command with no UI)" : changes.joined(separator: "; ")
-        return successJSON(info)
+        return changes.isEmpty ? "nothing visible changed (the key may still have worked, e.g. a command with no UI)" : changes.joined(separator: "; ")
     }
-
-    // MARK: - Snapshot
 
     struct FocusSnapshot: Equatable {
         var frontApp = ""
