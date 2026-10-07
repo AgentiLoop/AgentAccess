@@ -101,13 +101,19 @@ extension AccessibilityService {
 
     // MARK: - Menu Bar Navigation
 
+    /// AppleScript's `click menu item "X" of menu "Y" of menu bar 1`: walks the
+    /// menu tree WITHOUT opening any menu on screen and presses the final item.
+    /// A path that ends at a menu (["File"], ["Format", "Font"]) or an empty path
+    /// lists that menu's items instead of opening it — each with its shortcut in
+    /// press_key syntax, checkmark and enabled state (AppleScript's `name of every
+    /// menu item of menu "File"`). The result of a press reports what changed.
     @MainActor
     public func clickMenuItem(appBundleId: String?, menuPath: [String]) -> String {
         guard Self.hasAccessibilityPermission() else {
             return errorJSON("Accessibility permission required.")
         }
-        AuditLog.log(.accessibility, "clickMenuItem(app: \(appBundleId ?? "frontmost"), path: \(menuPath.joined(separator: " > ")))")
-        guard !menuPath.isEmpty else { return errorJSON("Menu path cannot be empty") }
+        let path = menuPath.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        AuditLog.log(.accessibility, "clickMenuItem(app: \(appBundleId ?? "frontmost"), path: \(path.joined(separator: " > ")))")
 
         let appElement: Element?
         if let bundleId = appBundleId,
@@ -121,54 +127,163 @@ extension AccessibilityService {
 
         guard let root = appElement, let menuBar = root.mainMenu() else {
             // Status-item-only apps have no main menu — try their menu-bar extras.
-            if let extra = clickMenuExtra(appElement: appElement, scanAll: appBundleId == nil, menuPath: menuPath) {
+            if let extra = clickMenuExtra(appElement: appElement, scanAll: appBundleId == nil, menuPath: path) {
                 return extra
             }
             return errorJSON("Could not access menu bar")
         }
+        if path.isEmpty {
+            let menus = (menuBar.children() ?? []).compactMap { $0.title() }.filter { !$0.isEmpty }
+            return successJSON(["message": "Menus of the menu bar (pass one as menuPath to list its items)", "items": menus])
+        }
 
-        var current = menuBar
-        for (i, menuName) in menuPath.enumerated() {
-            guard let children = current.children() else {
-                return errorJSON("Could not get children at level \(i) ('\(menuName)')")
-            }
-            guard let child = Self.bestMenuMatch(name: menuName, in: children) else {
+        // Walk: menu bar → bar item → its AXMenu → item → its AXMenu → …
+        var items = menuBar.children() ?? []
+        var chain: [Element] = []
+        for (i, menuName) in path.enumerated() {
+            guard let child = Self.bestMenuMatch(name: menuName, in: items) else {
                 // Not an app menu — maybe a menu-bar extra (Wi‑Fi, Battery, status items):
                 // AppleScript's `menu bar 2`. Without an app, search every app's extras.
-                if i == 0, let extra = clickMenuExtra(appElement: root, scanAll: appBundleId == nil, menuPath: menuPath) {
+                if i == 0, let extra = clickMenuExtra(appElement: root, scanAll: appBundleId == nil, menuPath: path) {
                     return extra
                 }
-                let available = children.compactMap { $0.title() }.filter { !$0.isEmpty }
-                var err = "Menu '\(menuName)' not found at level \(i)."
-                if !available.isEmpty {
-                    err += " Available: \(available.prefix(30).joined(separator: ", "))"
-                }
-                return errorJSON(err)
+                Self.closeMenus(chain)
+                let parent = i == 0 ? "the menu bar" : "'\(path[..<i].joined(separator: " > "))'"
+                return errorJSON("Menu item '\(menuName)' not found in \(parent). Available: \(Self.menuListing(items).prefix(40).joined(separator: ", "))")
             }
-            if i == menuPath.count - 1 {
-                if child.isEnabled() == false {
-                    return errorJSON("Menu item '\(child.title() ?? menuName)' is disabled (grayed out) right now")
-                }
-                do {
-                    try child.performAction(.press)
-                    return successJSON([
-                        "message": "Clicked menu: \(menuPath.joined(separator: " > "))",
-                        "matched": child.title() ?? menuName
-                    ])
-                } catch {
-                    return errorJSON("Failed to press menu item: \(child.title() ?? menuName)")
-                }
-            } else {
+            chain.append(child)
+            var submenu = Self.submenu(of: child)
+            if submenu != nil, submenu?.children()?.isEmpty ?? true {
+                // Lazily built menu (Open Recent, Window, Electron apps): open it once so the app fills it.
                 _ = try? child.performAction(.press)
-                Thread.sleep(forTimeInterval: 0.15)
-                if let subs = child.children(), let first = subs.first {
-                    current = first
-                } else {
-                    current = child
-                }
+                Thread.sleep(forTimeInterval: 0.25)
+                submenu = Self.submenu(of: child)
             }
+            if i < path.count - 1 {
+                guard let next = submenu?.children(), !next.isEmpty else {
+                    Self.closeMenus(chain)
+                    return errorJSON("'\(child.title() ?? menuName)' has no submenu — the path should end there: \(path[...i].joined(separator: " > "))")
+                }
+                items = next
+                continue
+            }
+
+            // Final element.
+            if let sub = submenu?.children(), !sub.isEmpty {
+                Self.closeMenus(chain)
+                var listing: [String: Any] = [
+                    "message": "'\(path.joined(separator: " > "))' is a menu — not opened. Its items (shortcut in press_key syntax, ✓ = checked, ▸ = submenu); add one to menuPath to click it",
+                    "items": Self.menuListing(sub),
+                ]
+                if let pid = root.pid(), NSRunningApplication(processIdentifier: pid)?.isActive == false {
+                    listing["note"] = "App is in the background, so items that need its window show [disabled]; clicking one brings the app forward first"
+                }
+                return successJSON(listing)
+            }
+            let title = child.title() ?? menuName
+            if child.isEnabled() == false, let pid = root.pid(),
+               let app = NSRunningApplication(processIdentifier: pid), !app.isActive {
+                // Menu items validate against the key window — background apps have none
+                // (TextEdit's File > Close is grayed out until it is frontmost).
+                app.activate()
+                let start = Date()
+                while !app.isActive, Date().timeIntervalSince(start) < 1.5 { Thread.sleep(forTimeInterval: 0.1) }
+                Thread.sleep(forTimeInterval: 0.15)
+            }
+            if child.isEnabled() == false {
+                Self.closeMenus(chain)
+                return errorJSON("Menu item '\(title)' is disabled (grayed out) right now")
+            }
+            let pid = root.pid() ?? 0
+            let before = Self.clickSnapshot(pid: pid, target: child, web: false)
+            var pressed = (try? child.performAction(.press)) != nil
+            if !pressed {
+                // Some apps only accept a press inside an open menu: open the chain, then press.
+                for opener in chain.dropLast() {
+                    _ = try? opener.performAction(.press)
+                    Thread.sleep(forTimeInterval: 0.2)
+                }
+                pressed = (try? child.performAction(.press)) != nil
+                if !pressed { Self.closeMenus(chain) }
+            }
+            guard pressed else { return errorJSON("Failed to press menu item: \(title)") }
+            let after = Self.waitForChange(from: before, pid: pid, target: child, web: false)
+            return successJSON([
+                "message": "Clicked menu: \(path.joined(separator: " > "))",
+                "matched": title,
+                "changed": before.changes(to: after) ?? "nothing visible changed (the command may still have worked — check with read_text)",
+            ])
         }
-        return errorJSON("Menu item not found: \(menuPath.joined(separator: " > "))")
+        return errorJSON("Menu item not found: \(path.joined(separator: " > "))")
+    }
+
+    /// The AXMenu under a menu bar item or menu item, if it has one.
+    @MainActor
+    static func submenu(of item: Element) -> Element? {
+        (item.children(strict: true) ?? []).first { $0.role() == "AXMenu" }
+    }
+
+    /// Cancel any menus a walk had to open (no-op for menus that never opened).
+    @MainActor
+    static func closeMenus(_ chain: [Element]) {
+        for item in chain.reversed() {
+            if let menu = submenu(of: item) { _ = try? menu.performAction(.cancel) }
+        }
+    }
+
+    /// Checkmark of a menu item ("✓", "•" mixed, "-"), nil when unmarked.
+    @MainActor
+    static func menuMark(_ item: Element) -> String? {
+        guard let m = item.attribute(Attribute<String>("AXMenuItemMarkChar")), !m.isEmpty else { return nil }
+        return m
+    }
+
+    /// Keyboard shortcut of a menu item in press_key syntax ("cmd+shift+s"), nil if none.
+    /// AXMenuItemCmdModifiers: bit0 shift, bit1 option, bit2 control, bit3 = NO command, bit4 fn (🌐).
+    /// Keys without a character (arrows, return, F-keys) come from AXMenuItemCmdGlyph / AXMenuItemCmdVirtualKey.
+    @MainActor
+    static func menuShortcut(_ item: Element) -> String? {
+        var key: String?
+        if let char = item.attribute(Attribute<String>("AXMenuItemCmdChar")), !char.isEmpty,
+           char.unicodeScalars.allSatisfy({ $0.value >= 0x20 && $0.value < 0xF700 }) {
+            key = char == " " ? "space" : char.lowercased()
+        } else if let glyph = item.attribute(Attribute<Int>("AXMenuItemCmdGlyph")), let name = menuGlyphKeys[glyph] {
+            key = name
+        } else if let vk = item.attribute(Attribute<Int>("AXMenuItemCmdVirtualKey")),
+                  let name = namedKeys.filter({ Int($0.value) == vk }).map(\.key).filter({ $0.allSatisfy(\.isASCII) }).min(by: { $0.count < $1.count }) {
+            key = name
+        }
+        guard let key else { return nil }
+        let mods = item.attribute(Attribute<Int>("AXMenuItemCmdModifiers")) ?? 0
+        var parts: [String] = []
+        if mods & 16 != 0 { parts.append("fn") }
+        if mods & 4 != 0 { parts.append("ctrl") }
+        if mods & 2 != 0 { parts.append("opt") }
+        if mods & 1 != 0 { parts.append("shift") }
+        if mods & 8 == 0 { parts.append("cmd") }
+        return (parts + [key]).joined(separator: "+")
+    }
+
+    /// Carbon menu glyph codes (Menus.h kMenu…Glyph) → press_key key names.
+    static let menuGlyphKeys: [Int: String] = [
+        0x02: "tab", 0x04: "enter", 0x09: "space", 0x0A: "forwarddelete", 0x0B: "return",
+        0x17: "delete", 0x1B: "escape", 0x64: "left", 0x65: "right", 0x68: "up", 0x6A: "down",
+        0x6F: "f1", 0x70: "f2", 0x71: "f3", 0x72: "f4", 0x73: "f5", 0x74: "f6",
+        0x75: "f7", 0x76: "f8", 0x77: "f9", 0x78: "f10", 0x79: "f11", 0x7A: "f12",
+    ]
+
+    /// "Save… (cmd+s)", "Show Sidebar ✓", "Open Recent ▸", "Paste (cmd+v) [disabled]".
+    @MainActor
+    static func menuListing(_ items: [Element]) -> [String] {
+        items.compactMap { item in
+            guard let title = item.title(), !title.isEmpty else { return nil }
+            var s = title
+            if let sc = menuShortcut(item) { s += " (\(sc))" }
+            if menuMark(item) != nil { s += " ✓" }
+            if submenu(of: item) != nil { s += " ▸" }
+            if item.isEnabled() == false { s += " [disabled]" }
+            return s
+        }
     }
 
     /// Normalize a menu title for tolerant matching: trim, lowercase, strip
