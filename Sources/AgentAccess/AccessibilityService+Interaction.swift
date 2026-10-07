@@ -380,48 +380,6 @@ extension AccessibilityService {
         return successJSON(["action": action, "element_status": elementStatus, "screenshot": screenshotResult])
     }
 
-    // MARK: - Type Text Into Element (AXorcist Element.typeText)
-
-    @MainActor
-    public func typeTextIntoElement(role: String?, title: String?, text: String, appBundleId: String?, verify: Bool = true) -> String {
-        if Self.isBrowser(appBundleId) || (appBundleId == nil && Self.frontmostAppIsBrowser()) {
-            return Self.safariPageInfo()
-        }
-        guard Self.hasAccessibilityPermission() else {
-            return errorJSON("Accessibility permission required.")
-        }
-        AuditLog.log(.accessibility, "typeTextIntoElement(role: \(role ?? "nil"), title: \(title ?? "nil"), text: \(text.count) chars)")
-
-        guard let found = findAXElement(role: role, title: title, value: nil, appBundleId: appBundleId) else {
-            // List the text inputs that actually exist so the LLM can retry
-            // with a real title instead of guessing again.
-            var hints: [String] = []
-            if let bid = appBundleId,
-               let app = RunningApplicationHelper.applications(withBundleIdentifier: bid).first,
-               let appElement = Element.application(for: app) {
-                for r in ["AXTextField", "AXTextArea", "AXSearchField", "AXComboBox"] {
-                    hints += interactiveTitles(in: appElement, role: r, limit: 8).map { "\(r) '\($0)'" }
-                }
-            }
-            var err = "Element not found for typing (role=\(role ?? "any"), title=\(title ?? "any"))."
-            if !hints.isEmpty { err += " Text inputs present: \(hints.joined(separator: " | "))" }
-            return errorJSON(err)
-        }
-
-        // AXorcist: try Element.setValue first (fastest)
-        if found.setValue(text, forAttribute: "AXValue") {
-            return successJSON(["message": "Text set via AXValue", "method": "element_setValue", "text_length": text.count])
-        }
-
-        // AXorcist: fallback to Element.typeText with clearFirst via Element.clearField()
-        do {
-            try found.typeText(text, clearFirst: true)
-            return successJSON(["message": "Typed \(text.count) characters", "method": "element_typeText", "text_length": text.count])
-        } catch {
-            return errorJSON("Type failed: \(error.localizedDescription)")
-        }
-    }
-
     // MARK: - Legacy Compatibility (return AXorcist Element.underlyingElement)
 
     /// Find element in app — returns AXorcist Element
