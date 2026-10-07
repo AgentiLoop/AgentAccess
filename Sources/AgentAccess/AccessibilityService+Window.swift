@@ -120,6 +120,10 @@ extension AccessibilityService {
         }
 
         guard let root = appElement, let menuBar = root.mainMenu() else {
+            // Status-item-only apps have no main menu — try their menu-bar extras.
+            if let extra = clickMenuExtra(appElement: appElement, scanAll: appBundleId == nil, menuPath: menuPath) {
+                return extra
+            }
             return errorJSON("Could not access menu bar")
         }
 
@@ -129,6 +133,11 @@ extension AccessibilityService {
                 return errorJSON("Could not get children at level \(i) ('\(menuName)')")
             }
             guard let child = Self.bestMenuMatch(name: menuName, in: children) else {
+                // Not an app menu — maybe a menu-bar extra (Wi‑Fi, Battery, status items):
+                // AppleScript's `menu bar 2`. Without an app, search every app's extras.
+                if i == 0, let extra = clickMenuExtra(appElement: root, scanAll: appBundleId == nil, menuPath: menuPath) {
+                    return extra
+                }
                 let available = children.compactMap { $0.title() }.filter { !$0.isEmpty }
                 var err = "Menu '\(menuName)' not found at level \(i)."
                 if !available.isEmpty {
